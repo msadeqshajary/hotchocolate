@@ -20,8 +20,6 @@ TODO
 
 TODO
 
-<!-- todo: explain first parameter -->
-
 <ExampleTabs>
 <ExampleTabs.Annotation>
 
@@ -33,6 +31,15 @@ public class User
 
     public string Name { get; set; }
 }
+```
+
+If no arguments are passed to the `ID` attribute, it will use the schema name of the type to produce the Id.
+
+We can override this behavior, by specifying a custom string that should be used to produce the Id.
+
+```csharp
+[ID("Foo")]
+public string Id { get; set; }
 ```
 
 </ExampleTabs.Annotation>
@@ -53,6 +60,14 @@ public class UserType : ObjectType<User>
         descriptor.Field(f => f.Id).ID();
     }
 }
+```
+
+If no arguments are passed to `ID()`, it will use the schema name of the type to produce the Id.
+
+We can override this behavior, by specifying a custom string that should be used to produce the Id.
+
+```csharp
+descriptor.Field(f => f.Id).ID("Foo");
 ```
 
 </ExampleTabs.Code>
