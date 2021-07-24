@@ -15,15 +15,309 @@ GraphQL gives us the freedom to define custom scalar types.
 This makes them the perfect tool for expressive value types.
 We could, for example, create a scalar for `CreditCardNumber` or `NonEmptyString`.
 
-The GraphQL specification defines the following scalars
+# GraphQL scalars
 
-| Type      | Description                                                 |
-| --------- | ----------------------------------------------------------- |
-| `Int`     | Signed 32-bit numeric non-fractional value                  |
-| `Float`   | Double-precision fractional values as specified by IEEE 754 |
-| `String`  | UTF-8 character sequences                                   |
-| `Boolean` | Boolean type representing true or false                     |
-| `ID`      | Unique identifier                                           |
+The GraphQL specification defines the following scalars.
+
+## String
+
+TODO: UTF-8 character sequences
+
+```sdl
+type Product {
+  description: String;
+}
+```
+
+## Boolean
+
+TODO: Boolean type representing true or false
+
+```sdl
+type Product {
+  purchasable: Boolean;
+}
+```
+
+## Int
+
+TODO: Signed 32-bit numeric non-fractional value
+
+```sdl
+type Product {
+  quantity: Int;
+}
+```
+
+## Float
+
+TODO: Double-precision fractional values as specified by IEEE 754
+
+```sdl
+type Product {
+  price: Float;
+}
+```
+
+## ID
+
+Most of the types in our schema will contain an `id` field, used to identify the corresponding entity in our persistence layer.
+
+Issues can arise, when the types of these `id` fields are dependent upon the technology used in the persistence layer. If we are using SQL for example, the type of the `id` field would be `Int`, when using MongoDB it would be `String`. If we ever decide to switch the technology used in the persistence layer, we would also have to change the schema type of the `id` fields accordingly. This would break most of our clients, even though these clients should not have to care which technology our backend is using to store an entity in the first place.
+
+To facilitate technology-specific Ids, there's the `ID` scalar.
+
+TODO: describe the ID scalar and its requirements in more detail
+
+```sdl
+type Query {
+  product(id: ID!): Product
+}
+
+type Product {
+  id: ID!;
+}
+```
+
+`ID` values are always represented as a [String](#string), but can be coerced to their expected type on the server.
+
+We can create a schema like the above in the following way.
+
+<ExampleTabs>
+<ExampleTabs.Annotation>
+
+```csharp
+public class Product
+{
+    [GraphQLType(typeof(IdType))]
+    public int Id { get; set; }
+}
+
+public class Query
+{
+    public Product GetProduct([GraphQLType(typeof(IdType))] int id)
+        => new() { Id = id };
+}
+```
+
+</ExampleTabs.Annotation>
+<ExampleTabs.Code>
+
+```csharp
+public class Product
+{
+    public int Id { get; set; }
+}
+
+public class ProductType : ObjectType<Product>
+{
+    protected override void Configure(IObjectTypeDescriptor<Product> descriptor)
+    {
+        descriptor.Name("Product");
+
+        descriptor.Field(f => f.Id).Type<NonNullType<IdType>>();
+    }
+}
+
+public class QueryType : ObjectType
+{
+    protected override void Configure(IObjectTypeDescriptor descriptor)
+    {
+        descriptor.Name(OperationTypeNames.Query);
+
+        descriptor
+            .Field("product")
+            .Argument("id", a => a.Type<NonNullType<IdType>>())
+            .Type<ProductType>()
+            .Resolve(context =>
+            {
+                var id = context.ArgumentValue<int>("id");
+
+                return new Product { Id = id };
+            });
+    }
+}
+```
+
+</ExampleTabs.Code>
+<ExampleTabs.Schema>
+
+TODO
+
+</ExampleTabs.Schema>
+</ExampleTabs>
+
+Usage of the `ID` scalar would look like the following.
+
+**Request:**
+
+```graphql
+{
+  product(id: "123") {
+    id
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "product": {
+      "id": "123"
+    }
+  }
+}
+```
+
+Notice how our code uses `int` for the `Id`, but in the actual request and the response a `string` is being used. This allows us to switch the CLR type of our `Id`, without affecting the schema and our clients.
+
+### Unique Ids
+
+We have looked at how we can facilitate Ids in a technology-agnostic way using the `ID` scalar, but up until now we have ignored the uniqueness requirement the scalar poses.
+
+As it stands, we could still have the same Id for two of our types. A `Product` and `Order` type could be represented by two SQL tables, which both contain a row with the Id `1`.
+
+We could switch to another Id format or use another technology to enforce unique Ids, but there's an easier, more integrated way to go about it in Hot Chocolate: We can just combine the name of the type with the actual id to form an Id that's unique within the schema.
+
+<ExampleTabs>
+<ExampleTabs.Annotation>
+
+In the Annotation-based approach, we can just annotate fields and arguments using the `ID` attribute.
+
+```csharp
+public class Product
+{
+    [ID]
+    public int Id { get; set; }
+}
+
+public class Query
+{
+    public Product GetProduct([ID] int id)
+        => new() { Id = id };
+}
+```
+
+If no arguments are passed to the `ID` attribute, it will use the schema name of the type to produce the Id.
+
+We can override this behavior, by specifying a custom string that should be used to produce the Id.
+
+```csharp
+[ID("Foo")]
+public int Id { get; set; }
+```
+
+</ExampleTabs.Annotation>
+<ExampleTabs.Code>
+
+```csharp
+public class Product
+{
+    public string Id { get; set; }
+}
+
+public class ProductType : ObjectType<Product>
+{
+    protected override void Configure(IObjectTypeDescriptor<Product> descriptor)
+    {
+        descriptor.Field(f => f.Id).ID();
+    }
+}
+
+public class QueryType : ObjectType
+{
+    protected override void Configure(IObjectTypeDescriptor descriptor)
+    {
+        descriptor.Name(OperationTypeNames.Query);
+
+        descriptor
+            .Field("product")
+            .Argument("id", a => a.Type<NonNullType<IdType>>().ID())
+            .Type<ProductType>()
+            .Resolve(context =>
+            {
+                var id = context.ArgumentValue<int>("id");
+
+                return new Product { Id = id };
+            });
+    }
+}
+```
+
+> Note: We still need to specify a type for the argument, in order for non-null or lists of Ids to correctly be inferred.
+
+If no arguments are passed to `ID()`, it will use the schema name of the type to produce the Id.
+
+We can override this behavior, by specifying a custom string that should be used to produce the Id.
+
+```csharp
+descriptor.Field(f => f.Id).ID("Foo");
+```
+
+</ExampleTabs.Code>
+<ExampleTabs.Schema>
+
+TODO
+
+</ExampleTabs.Schema>
+</ExampleTabs>
+
+Fields and arguments defined like above are still represented using an `ID` scalar, but now they are Base64 encoded and contain the name of the type as well as the actual Id.
+
+Similar to the regular coercion of the `ID` scalar, the Id values are encoded when used in an output type, and decoded when used in an input type.
+
+**Request:**
+
+```graphql
+{
+  product(id: "UHJvZHVjdAppMTIz") {
+    id
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "product": {
+      "id": "UHJvZHVjdAppMTIz"
+    }
+  }
+}
+```
+
+Now that our Ids are unique, we can make use of things like Global Object Identification.
+
+[Learn more about Global Object Identification](/docs/hotchocolate/defining-a-schema/relay#global-object-identification)
+
+#### Id Serializer
+
+If we need to we can also work directly with the `IIdSerializer` used to generate unique Ids.
+
+```csharp
+public class Query
+{
+    public string Example([Service] IIdSerializer serializer)
+    {
+        string serializedId = serializer.Serialize(null, "User", "123");
+
+        IdValue deserializedIdValue = serializer.Deserialize(serializedId);
+        object deserializedId = deserializedIdValue.Value;
+
+        // Omitted code for brevity
+    }
+}
+```
+
+The `Serialize()` method takes the schema name as a first argument, followed by the type name and lastly the actual Id.
+
+The `IIdSerializer` is a regular service and can therefore be accessed like any other service.
+
+[Learn more about injecting services](/docs/hotchocolate/fetching-data/resolvers#injecting-services)
 
 # .NET Scalars
 
